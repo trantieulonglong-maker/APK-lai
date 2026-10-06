@@ -1,0 +1,1146 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
+    steps:
+      - name: Generate project sources
+        run: |
+          mkdir -p 'app'
+          cat > 'app/build.gradle' <<'KM_EOF_7Q'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.otgmap'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId 'com.otgmap.keymapper'
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          tasks.withType(JavaCompile).configureEach {
+              options.encoding = 'UTF-8'
+          }
+          KM_EOF_7Q
+          mkdir -p 'app/src/main'
+          cat > 'app/src/main/AndroidManifest.xml' <<'KM_EOF_7Q'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-feature
+                  android:name="android.hardware.usb.host"
+                  android:required="false" />
+
+              <application
+                  android:allowBackup="false"
+                  android:label="@string/app_name"
+                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".MapperService"
+                      android:exported="false"
+                      android:label="@string/app_name"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_config" />
+                  </service>
+              </application>
+          </manifest>
+          KM_EOF_7Q
+          mkdir -p 'app/src/main/java/com/otgmap'
+          cat > 'app/src/main/java/com/otgmap/MainActivity.java' <<'KM_EOF_7Q'
+          package com.otgmap;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.graphics.Typeface;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.view.View;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          public class MainActivity extends Activity {
+              private TextView state;
+
+              @Override
+              protected void onCreate(Bundle saved) {
+                  super.onCreate(saved);
+                  int pad = (int) (18 * getResources().getDisplayMetrics().density);
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(pad, pad * 2, pad, pad);
+
+                  TextView title = new TextView(this);
+                  title.setText("OTG Key Mapper");
+                  title.setTextSize(26);
+                  title.setTypeface(null, Typeface.BOLD);
+                  root.addView(title);
+
+                  state = new TextView(this);
+                  state.setTextSize(16);
+                  state.setPadding(0, pad / 2, 0, pad / 2);
+                  root.addView(state);
+
+                  TextView guide = new TextView(this);
+                  guide.setTextSize(15);
+                  guide.setLineSpacing(0, 1.15f);
+                  guide.setPadding(0, 0, 0, pad);
+                  guide.setText("Cách dùng:\n\n"
+                          + "1. Bấm nút 'Mở cài đặt Trợ năng' > chọn 'OTG Key Mapper' > bật.\n"
+                          + "(Android 13+: nếu công tắc bị mờ, bấm 'Cài đặt ứng dụng' > dấu 3 chấm ở góc > "
+                          + "'Cho phép cài đặt bị hạn chế', rồi quay lại bật.)\n\n"
+                          + "2. Cắm bàn phím OTG: bong bóng 'KM' tự hiện trên màn hình "
+                          + "(hoặc bấm 'Hiện cửa sổ nổi').\n\n"
+                          + "3. Mở bong bóng > '+ Phím' > nhấn 1 phím trên bàn phím > kéo vòng tròn tới đúng "
+                          + "nút trong game > 'Xong'.\n\n"
+                          + "4. '+ WASD' tạo cần di chuyển: kéo vòng xanh tới giữa joystick trong game, "
+                          + "chỉnh +/- cho vừa bán kính.\n\n"
+                          + "Chạm = bấm 1 lần mỗi khi nhấn phím. Giữ = giữ ngón tay khi còn giữ phím.");
+                  root.addView(guide);
+
+                  root.addView(button("Mở cài đặt Trợ năng",
+                          v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))));
+                  root.addView(button("Cài đặt ứng dụng (Android 13+)",
+                          v -> startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                  Uri.parse("package:" + getPackageName())))));
+                  root.addView(button("Hiện cửa sổ nổi", v -> {
+                      MapperService s = MapperService.instance;
+                      if (s == null) {
+                          Toast.makeText(this, "Hãy bật dịch vụ Trợ năng trước", Toast.LENGTH_SHORT).show();
+                      } else {
+                          s.showFloating();
+                      }
+                  }));
+
+                  ScrollView sv = new ScrollView(this);
+                  sv.addView(root);
+                  setContentView(sv);
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  state.setText(MapperService.instance != null
+                          ? "Trạng thái: ĐANG CHẠY"
+                          : "Trạng thái: CHƯA BẬT (làm bước 1)");
+              }
+
+              private Button button(String text, View.OnClickListener l) {
+                  Button b = new Button(this);
+                  b.setText(text);
+                  b.setAllCaps(false);
+                  b.setOnClickListener(l);
+                  return b;
+              }
+          }
+          KM_EOF_7Q
+          mkdir -p 'app/src/main/java/com/otgmap'
+          cat > 'app/src/main/java/com/otgmap/MapperService.java' <<'KM_EOF_7Q'
+          package com.otgmap;
+
+          import android.accessibilityservice.AccessibilityService;
+          import android.accessibilityservice.GestureDescription;
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.graphics.Path;
+          import android.graphics.PixelFormat;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.hardware.display.DisplayManager;
+          import android.hardware.input.InputManager;
+          import android.os.Build;
+          import android.util.DisplayMetrics;
+          import android.view.Gravity;
+          import android.view.InputDevice;
+          import android.view.KeyEvent;
+          import android.view.MotionEvent;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.WindowManager;
+          import android.view.accessibility.AccessibilityEvent;
+          import android.widget.Button;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+
+          import java.util.ArrayList;
+          import java.util.Arrays;
+          import java.util.Iterator;
+          import java.util.LinkedHashMap;
+          import java.util.List;
+          import java.util.Map;
+
+          /**
+           * Dịch vụ Trợ năng: bắt phím từ bàn phím OTG rồi đổi thành cú chạm trên màn hình.
+           * - Cửa sổ nổi (bong bóng "KM"): gán phím, kéo vị trí nút, bật/tắt ánh xạ.
+           * - Cần di chuyển WASD: kéo ngón tay từ tâm ra ngoài theo hướng phím.
+           */
+          public class MapperService extends AccessibilityService {
+              static MapperService instance;
+
+              static final int TAP = 0, HOLD = 1, STICK = 2;
+              static final int TEAL = 0xFF1B8A7E, AMBER = 0xFFC77700, RED = 0xFFC5432F,
+                      SLATE = 0xFF3C4650, SKY = 0xFF2A7FB8;
+
+              /** Một ô gán: TAP/HOLD (phím -> điểm chạm) hoặc STICK (WASD -> cần di chuyển). */
+              static class Bind {
+                  int type, key = -1, touchId = -1;
+                  float fx = 0.5f, fy = 0.5f, r = 0.10f;  // vị trí theo tỉ lệ màn hình; r = bán kính cần
+                  boolean land;                            // tạo ở chế độ màn hình ngang?
+                  final boolean[] dir = new boolean[4];    // lên, xuống, trái, phải
+                  View marker;
+              }
+
+              /** Một ngón tay đang (hoặc sắp) chạm. */
+              static class Touch {
+                  float cx, cy, tx, ty, sx, sy;
+                  boolean release, sendRelease, started, inFlight;
+                  GestureDescription.StrokeDescription stroke;
+              }
+
+              private final List<Bind> binds = new ArrayList<>();
+              private final Map<Integer, Touch> touches = new LinkedHashMap<>();
+              private int nextId = 1;
+              private boolean busy;
+
+              private WindowManager wm;
+              private SharedPreferences prefs;
+              private InputManager.InputDeviceListener inputListener;
+              private DisplayManager.DisplayListener displayListener;
+              private float density = 3f;
+              private int realW = 1080, realH = 1920;
+
+              private boolean mappingOn = true, capturing, editing, expanded;
+              private boolean kbPresent, forceShow, userHidden, mainAttached;
+              private int kbCount, mouseCount;
+
+              private FrameLayout main;
+              private WindowManager.LayoutParams mainLp;
+              private View bubble, panel;
+              private TextView status, hint;
+              private Button btnOn, btnAdd, btnEdit;
+              private LinearLayout list;
+
+              // ===================== Vòng đời =====================
+
+              @Override
+              protected void onServiceConnected() {
+                  super.onServiceConnected();
+                  instance = this;
+                  if (wm != null) return;
+                  wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+                  prefs = getSharedPreferences("km", MODE_PRIVATE);
+                  readScreen();
+                  loadBinds();
+                  buildMain();
+
+                  inputListener = new InputManager.InputDeviceListener() {
+                      @Override public void onInputDeviceAdded(int id) { scanDevices(); }
+                      @Override public void onInputDeviceRemoved(int id) { scanDevices(); }
+                      @Override public void onInputDeviceChanged(int id) { scanDevices(); }
+                  };
+                  ((InputManager) getSystemService(Context.INPUT_SERVICE))
+                          .registerInputDeviceListener(inputListener, null);
+
+                  displayListener = new DisplayManager.DisplayListener() {
+                      @Override public void onDisplayAdded(int id) { }
+                      @Override public void onDisplayRemoved(int id) { }
+                      @Override public void onDisplayChanged(int id) { onScreenChanged(); }
+                  };
+                  ((DisplayManager) getSystemService(Context.DISPLAY_SERVICE))
+                          .registerDisplayListener(displayListener, null);
+
+                  scanDevices();
+              }
+
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent event) { }
+
+              @Override
+              public void onInterrupt() { }
+
+              @Override
+              public void onDestroy() {
+                  instance = null;
+                  try {
+                      releaseAll();
+                      hideMain();
+                      if (inputListener != null) {
+                          ((InputManager) getSystemService(Context.INPUT_SERVICE))
+                                  .unregisterInputDeviceListener(inputListener);
+                      }
+                      if (displayListener != null) {
+                          ((DisplayManager) getSystemService(Context.DISPLAY_SERVICE))
+                                  .unregisterDisplayListener(displayListener);
+                      }
+                  } catch (Exception ignored) { }
+                  super.onDestroy();
+              }
+
+              /** Gọi từ MainActivity để hiện cửa sổ nổi thủ công. */
+              void showFloating() {
+                  forceShow = true;
+                  userHidden = false;
+                  updateVisibility();
+                  setExpanded(true);
+              }
+
+              // ===================== Xử lý phím =====================
+
+              @Override
+              protected boolean onKeyEvent(KeyEvent e) {
+                  try {
+                      return handleKey(e);
+                  } catch (Exception ex) {
+                      return false;
+                  }
+              }
+
+              private boolean handleKey(KeyEvent e) {
+                  int code = e.getKeyCode();
+                  boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+                  boolean fresh = down && e.getRepeatCount() == 0;
+
+                  if (capturing) {
+                      if (blocked(code)) {
+                          if (fresh) setHint("Phím này không dùng được, hãy thử phím khác");
+                          return false;
+                      }
+                      if (fresh) finishCapture(code);
+                      return true;
+                  }
+                  if (!mappingOn || binds.isEmpty() || blocked(code)) return false;
+
+                  readScreen();
+                  boolean handled = false;
+                  for (Bind b : binds) {
+                      if (b.land != isLand()) continue;
+                      if (b.type == STICK) {
+                          int d = dirOf(code);
+                          if (d < 0) continue;
+                          handled = true;
+                          if (b.dir[d] != down) {
+                              b.dir[d] = down;
+                              stickUpdate(b);
+                          }
+                      } else if (b.key == code) {
+                          handled = true;
+                          boolean alive = b.touchId >= 0 && touches.containsKey(b.touchId);
+                          if (fresh && !alive) {
+                              float cx = b.fx * realW, cy = b.fy * realH;
+                              if (b.type == TAP) gTap(cx, cy);
+                              else b.touchId = gDown(cx, cy, cx, cy);
+                          } else if (!down && b.type == HOLD && b.touchId >= 0) {
+                              gUp(b.touchId);
+                              b.touchId = -1;
+                          }
+                      }
+                  }
+                  return handled;
+              }
+
+              private void stickUpdate(Bind b) {
+                  int dx = (b.dir[3] ? 1 : 0) - (b.dir[2] ? 1 : 0);
+                  int dy = (b.dir[1] ? 1 : 0) - (b.dir[0] ? 1 : 0);
+                  if (dx == 0 && dy == 0) {
+                      if (b.touchId >= 0) {
+                          gUp(b.touchId);
+                          b.touchId = -1;
+                      }
+                      return;
+                  }
+                  float len = (float) Math.sqrt(dx * dx + dy * dy);
+                  float rad = b.r * Math.min(realW, realH);
+                  float cx = b.fx * realW, cy = b.fy * realH;
+                  float tx = cx + dx / len * rad, ty = cy + dy / len * rad;
+                  if (b.touchId < 0 || !touches.containsKey(b.touchId)) b.touchId = gDown(cx, cy, tx, ty);
+                  else gMove(b.touchId, tx, ty);
+              }
+
+              private static boolean blocked(int k) {
+                  return k == KeyEvent.KEYCODE_BACK || k == KeyEvent.KEYCODE_HOME
+                          || k == KeyEvent.KEYCODE_POWER || k == KeyEvent.KEYCODE_APP_SWITCH
+                          || k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN
+                          || k == KeyEvent.KEYCODE_VOLUME_MUTE || k == KeyEvent.KEYCODE_UNKNOWN;
+              }
+
+              private static int dirOf(int k) {
+                  switch (k) {
+                      case KeyEvent.KEYCODE_W:
+                      case KeyEvent.KEYCODE_DPAD_UP:
+                          return 0;
+                      case KeyEvent.KEYCODE_S:
+                      case KeyEvent.KEYCODE_DPAD_DOWN:
+                          return 1;
+                      case KeyEvent.KEYCODE_A:
+                      case KeyEvent.KEYCODE_DPAD_LEFT:
+                          return 2;
+                      case KeyEvent.KEYCODE_D:
+                      case KeyEvent.KEYCODE_DPAD_RIGHT:
+                          return 3;
+                      default:
+                          return -1;
+                  }
+              }
+
+              private static String keyName(int k) {
+                  String s = KeyEvent.keyCodeToString(k).replace("KEYCODE_", "").replace("DPAD_", "")
+                          .replace("_LEFT", " L").replace("_RIGHT", " R");
+                  return s.length() > 8 ? s.substring(0, 8) : s;
+              }
+
+              private void releaseAll() {
+                  for (Bind b : binds) {
+                      if (b.touchId >= 0) {
+                          gUp(b.touchId);
+                          b.touchId = -1;
+                      }
+                      Arrays.fill(b.dir, false);
+                  }
+              }
+
+              // ===================== Giả lập chạm (dispatchGesture) =====================
+              // Mọi ngón tay đang giữ đều được "nối tiếp" (continueStroke) trong mỗi lần gửi,
+              // nếu không hệ thống sẽ hủy chúng.
+
+              private int gDown(float x, float y, float tx, float ty) {
+                  Touch t = new Touch();
+                  t.cx = x;
+                  t.cy = y;
+                  t.tx = tx;
+                  t.ty = ty;
+                  int id = nextId++;
+                  touches.put(id, t);
+                  pump();
+                  return id;
+              }
+
+              private void gTap(float x, float y) {
+                  Touch t = new Touch();
+                  t.cx = x;
+                  t.cy = y;
+                  t.tx = x;
+                  t.ty = y;
+                  t.release = true;
+                  touches.put(nextId++, t);
+                  pump();
+              }
+
+              private void gMove(int id, float x, float y) {
+                  Touch t = touches.get(id);
+                  if (t == null || t.release) return;
+                  t.tx = x;
+                  t.ty = y;
+                  pump();
+              }
+
+              private void gUp(int id) {
+                  Touch t = touches.get(id);
+                  if (t == null) return;
+                  t.release = true;
+                  pump();
+              }
+
+              private boolean needsPump() {
+                  for (Touch t : touches.values()) {
+                      if (t.release || !t.started || t.cx != t.tx || t.cy != t.ty) return true;
+                  }
+                  return false;
+              }
+
+              private static float clampF(float v, int max) {
+                  return Math.max(0f, Math.min(v, max - 1f));
+              }
+
+              private void pump() {
+                  if (busy || touches.isEmpty() || !needsPump()) return;
+                  GestureDescription.Builder gb = new GestureDescription.Builder();
+                  int max = GestureDescription.getMaxStrokeCount();
+                  int n = 0;
+                  for (Touch t : touches.values()) {
+                      if (n >= max) break;
+                      boolean moving = t.cx != t.tx || t.cy != t.ty;
+                      Path p = new Path();
+                      p.moveTo(clampF(t.cx, realW), clampF(t.cy, realH));
+                      if (moving) p.lineTo(clampF(t.tx, realW), clampF(t.ty, realH));
+                      t.sendRelease = t.release;
+                      t.sx = t.tx;
+                      t.sy = t.ty;
+                      long dur = (moving || !t.started) ? 40 : 10;
+                      GestureDescription.StrokeDescription sd = (t.stroke == null)
+                              ? new GestureDescription.StrokeDescription(p, 0, dur, !t.release)
+                              : t.stroke.continueStroke(p, 0, dur, !t.release);
+                      t.stroke = sd;
+                      t.inFlight = true;
+                      gb.addStroke(sd);
+                      n++;
+                  }
+                  if (n == 0) return;
+                  busy = true;
+                  boolean ok;
+                  try {
+                      ok = dispatchGesture(gb.build(), new AccessibilityService.GestureResultCallback() {
+                          @Override
+                          public void onCompleted(GestureDescription g) {
+                              done(true);
+                          }
+
+                          @Override
+                          public void onCancelled(GestureDescription g) {
+                              done(false);
+                          }
+                      }, null);
+                  } catch (Exception ex) {
+                      ok = false;
+                  }
+                  if (!ok) done(false);
+              }
+
+              private void done(boolean ok) {
+                  busy = false;
+                  if (!ok) {
+                      touches.clear();
+                      return;
+                  }
+                  for (Iterator<Touch> it = touches.values().iterator(); it.hasNext(); ) {
+                      Touch t = it.next();
+                      if (!t.inFlight) continue;
+                      t.inFlight = false;
+                      t.cx = t.sx;
+                      t.cy = t.sy;
+                      t.started = true;
+                      if (t.sendRelease) it.remove();
+                  }
+                  pump();
+              }
+
+              // ===================== Thao tác gán phím =====================
+
+              private void setMapping(boolean on) {
+                  mappingOn = on;
+                  if (!on) releaseAll();
+                  saveAll();
+                  refreshUi();
+              }
+
+              private void toggleCapture() {
+                  capturing = !capturing;
+                  setHint(capturing ? "Nhấn 1 phím trên bàn phím OTG..." : null);
+                  refreshUi();
+              }
+
+              private void finishCapture(int code) {
+                  capturing = false;
+                  readScreen();
+                  int count = 0;
+                  for (Iterator<Bind> it = binds.iterator(); it.hasNext(); ) {
+                      Bind o = it.next();
+                      if (o.land != isLand()) continue;
+                      if (o.type != STICK && o.key == code) {
+                          if (o.touchId >= 0) gUp(o.touchId);
+                          if (o.marker != null) {
+                              try { wm.removeView(o.marker); } catch (Exception ignored) { }
+                          }
+                          it.remove();
+                      } else {
+                          count++;
+                      }
+                  }
+                  Bind b = new Bind();
+                  b.type = TAP;
+                  b.key = code;
+                  b.land = isLand();
+                  b.fx = Math.min(0.9f, 0.45f + 0.04f * (count % 8));
+                  b.fy = 0.5f;
+                  binds.add(b);
+                  saveAll();
+                  setHint("Đã gán " + keyName(code) + ". Kéo vòng tròn tới nút trong game rồi bấm Xong.");
+                  setEditing(true);
+              }
+
+              private void addStick() {
+                  for (Bind o : binds) {
+                      if (o.type == STICK && o.land == isLand()) {
+                          setHint("Đã có cần WASD ở chế độ màn hình này.");
+                          return;
+                      }
+                  }
+                  Bind b = new Bind();
+                  b.type = STICK;
+                  b.land = isLand();
+                  b.fx = 0.18f;
+                  b.fy = 0.68f;
+                  binds.add(b);
+                  saveAll();
+                  setHint("Kéo vòng xanh tới giữa cần di chuyển trong game, chỉnh +/- cho vừa bán kính.");
+                  setEditing(true);
+              }
+
+              private void toggleMode(Bind b) {
+                  if (b.touchId >= 0) {
+                      gUp(b.touchId);
+                      b.touchId = -1;
+                  }
+                  b.type = (b.type == HOLD) ? TAP : HOLD;
+                  saveAll();
+                  if (editing) setEditing(true); else refreshUi();
+              }
+
+              private void adjustRadius(Bind b, float d) {
+                  b.r = Math.max(0.03f, Math.min(0.30f, b.r + d));
+                  saveAll();
+                  if (editing) setEditing(true); else refreshUi();
+              }
+
+              private void removeBind(Bind b) {
+                  if (b.touchId >= 0) gUp(b.touchId);
+                  if (b.marker != null) {
+                      try { wm.removeView(b.marker); } catch (Exception ignored) { }
+                      b.marker = null;
+                  }
+                  binds.remove(b);
+                  saveAll();
+                  refreshUi();
+              }
+
+              private void clearAll() {
+                  releaseAll();
+                  clearMarkers();
+                  for (Iterator<Bind> it = binds.iterator(); it.hasNext(); ) {
+                      if (it.next().land == isLand()) it.remove();
+                  }
+                  saveAll();
+                  refreshUi();
+              }
+
+              // ===================== Thiết bị & màn hình =====================
+
+              private void scanDevices() {
+                  int kb = 0, ms = 0;
+                  for (int id : InputDevice.getDeviceIds()) {
+                      InputDevice d = InputDevice.getDevice(id);
+                      if (d == null || d.isVirtual()) continue;
+                      int src = d.getSources();
+                      if ((src & InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
+                              && d.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) kb++;
+                      if ((src & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE) ms++;
+                  }
+                  boolean was = kbPresent;
+                  kbCount = kb;
+                  mouseCount = ms;
+                  kbPresent = kb > 0;
+                  if (kbPresent && !was) {
+                      userHidden = false;
+                      toast("Đã nhận bàn phím OTG");
+                  }
+                  updateVisibility();
+                  refreshUi();
+              }
+
+              private void readScreen() {
+                  DisplayMetrics dm = new DisplayMetrics();
+                  wm.getDefaultDisplay().getRealMetrics(dm);
+                  realW = dm.widthPixels;
+                  realH = dm.heightPixels;
+                  density = dm.density;
+              }
+
+              private boolean isLand() {
+                  return realW > realH;
+              }
+
+              private void onScreenChanged() {
+                  boolean was = isLand();
+                  readScreen();
+                  if (was == isLand()) return;
+                  releaseAll();
+                  if (mainAttached) {
+                      clampMain();
+                      if (editing) setEditing(true); else refreshUi();
+                  }
+              }
+
+              private void toast(String s) {
+                  Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+              }
+
+              // ===================== Giao diện nổi =====================
+
+              private int dp(float v) {
+                  return (int) (v * density + 0.5f);
+              }
+
+              private static int withAlpha(int c, int a) {
+                  return (c & 0x00FFFFFF) | (a << 24);
+              }
+
+              private GradientDrawable shape(int color, int type, float radiusDp) {
+                  GradientDrawable g = new GradientDrawable();
+                  g.setShape(type);
+                  g.setColor(color);
+                  if (type == GradientDrawable.RECTANGLE) g.setCornerRadius(dp(radiusDp));
+                  return g;
+              }
+
+              private TextView txt(String s, float sp, int color) {
+                  TextView t = new TextView(this);
+                  t.setText(s);
+                  t.setTextSize(sp);
+                  t.setTextColor(color);
+                  return t;
+              }
+
+              private Button btn(String s, int color, View.OnClickListener l) {
+                  Button b = new Button(this);
+                  b.setText(s);
+                  b.setTextSize(12);
+                  b.setTextColor(Color.WHITE);
+                  b.setAllCaps(false);
+                  b.setMinHeight(0);
+                  b.setMinimumHeight(0);
+                  b.setMinWidth(0);
+                  b.setMinimumWidth(0);
+                  b.setBackground(shape(color, GradientDrawable.RECTANGLE, 8));
+                  b.setPadding(dp(9), dp(5), dp(9), dp(5));
+                  b.setOnClickListener(l);
+                  return b;
+              }
+
+              private LinearLayout row(View... vs) {
+                  LinearLayout r = new LinearLayout(this);
+                  r.setGravity(Gravity.CENTER_VERTICAL);
+                  r.setPadding(0, dp(3), 0, dp(3));
+                  for (View v : vs) {
+                      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                              ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                      lp.leftMargin = dp(5);
+                      r.addView(v, lp);
+                  }
+                  return r;
+              }
+
+              private void grow(View v) {
+                  LinearLayout.LayoutParams l = (LinearLayout.LayoutParams) v.getLayoutParams();
+                  l.width = 0;
+                  l.weight = 1f;
+                  l.leftMargin = 0;
+              }
+
+              private WindowManager.LayoutParams newLp(int w, int h) {
+                  WindowManager.LayoutParams lp = new WindowManager.LayoutParams(w, h,
+                          WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                  | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                  | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                          PixelFormat.TRANSLUCENT);
+                  lp.gravity = Gravity.TOP | Gravity.LEFT;
+                  if (Build.VERSION.SDK_INT >= 28) {
+                      lp.layoutInDisplayCutoutMode =
+                              WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                  }
+                  return lp;
+              }
+
+              /** Kéo cửa sổ bằng handle; chạm nhẹ = onClick, thả sau khi kéo = onDrop. */
+              private void attachDrag(View handle, final WindowManager.LayoutParams lp, final View target,
+                                      final Runnable onClick, final Runnable onDrop) {
+                  handle.setOnTouchListener(new View.OnTouchListener() {
+                      float downX, downY;
+                      int startX, startY;
+                      boolean moved;
+
+                      @Override
+                      public boolean onTouch(View v, MotionEvent e) {
+                          switch (e.getActionMasked()) {
+                              case MotionEvent.ACTION_DOWN:
+                                  downX = e.getRawX();
+                                  downY = e.getRawY();
+                                  startX = lp.x;
+                                  startY = lp.y;
+                                  moved = false;
+                                  return true;
+                              case MotionEvent.ACTION_MOVE: {
+                                  float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
+                                  if (!moved && Math.abs(dx) + Math.abs(dy) < dp(6)) return true;
+                                  moved = true;
+                                  lp.x = startX + (int) dx;
+                                  lp.y = startY + (int) dy;
+                                  try { wm.updateViewLayout(target, lp); } catch (Exception ignored) { }
+                                  return true;
+                              }
+                              case MotionEvent.ACTION_UP:
+                                  if (moved) {
+                                      if (onDrop != null) onDrop.run();
+                                  } else if (onClick != null) {
+                                      onClick.run();
+                                  }
+                                  return true;
+                              default:
+                                  return true;
+                          }
+                      }
+                  });
+              }
+
+              private void buildMain() {
+                  main = new FrameLayout(this);
+
+                  TextView bb = txt("KM", 13, Color.WHITE);
+                  bb.setGravity(Gravity.CENTER);
+                  bb.setTypeface(null, Typeface.BOLD);
+                  bubble = bb;
+                  main.addView(bubble, new FrameLayout.LayoutParams(dp(46), dp(46)));
+
+                  LinearLayout p = new LinearLayout(this);
+                  p.setOrientation(LinearLayout.VERTICAL);
+                  p.setPadding(dp(10), dp(8), dp(10), dp(8));
+                  p.setBackground(shape(0xF21E2227, GradientDrawable.RECTANGLE, 14));
+                  panel = p;
+
+                  TextView title = txt("OTG Key Mapper", 14, Color.WHITE);
+                  title.setTypeface(null, Typeface.BOLD);
+                  LinearLayout head = row(title,
+                          btn("Thu", SLATE, v -> setExpanded(false)),
+                          btn("Ẩn", SLATE, v -> {
+                              forceShow = false;
+                              userHidden = true;
+                              updateVisibility();
+                          }));
+                  grow(title);
+                  p.addView(head);
+
+                  status = txt("", 11, 0xFF9AA5B1);
+                  p.addView(status);
+
+                  btnOn = btn("", TEAL, v -> setMapping(!mappingOn));
+                  p.addView(btnOn, new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                  btnAdd = btn("+ Phím", SKY, v -> toggleCapture());
+                  Button bs = btn("+ WASD", SKY, v -> addStick());
+                  btnEdit = btn("Sửa vị trí", SLATE, v -> setEditing(!editing));
+                  p.addView(row(btnAdd, bs, btnEdit));
+
+                  hint = txt("", 11, 0xFFFFC857);
+                  hint.setVisibility(View.GONE);
+                  p.addView(hint);
+
+                  list = new LinearLayout(this);
+                  list.setOrientation(LinearLayout.VERTICAL);
+                  ScrollView sv = new ScrollView(this);
+                  sv.addView(list);
+                  p.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(110)));
+
+                  p.addView(row(btn("Xóa hết", RED, v -> clearAll())));
+
+                  panel.setVisibility(View.GONE);
+                  main.addView(panel, new FrameLayout.LayoutParams(dp(260), ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                  mainLp = newLp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  mainLp.x = dp(12);
+                  mainLp.y = dp(110);
+
+                  attachDrag(bubble, mainLp, main, () -> setExpanded(true), null);
+                  attachDrag(title, mainLp, main, null, null);
+              }
+
+              private void updateVisibility() {
+                  boolean show = (kbPresent && !userHidden) || forceShow;
+                  if (show) showMain(); else hideMain();
+              }
+
+              private void showMain() {
+                  if (mainAttached || main == null) return;
+                  readScreen();
+                  clampMain();
+                  try {
+                      wm.addView(main, mainLp);
+                      mainAttached = true;
+                  } catch (Exception ex) {
+                      return;
+                  }
+                  refreshUi();
+              }
+
+              private void hideMain() {
+                  if (!mainAttached) return;
+                  capturing = false;
+                  editing = false;
+                  clearMarkers();
+                  try { wm.removeView(main); } catch (Exception ignored) { }
+                  mainAttached = false;
+              }
+
+              private void setExpanded(boolean ex) {
+                  expanded = ex;
+                  if (!ex) {
+                      capturing = false;
+                      setHint(null);
+                      setEditing(false);
+                  }
+                  bubble.setVisibility(ex ? View.GONE : View.VISIBLE);
+                  panel.setVisibility(ex ? View.VISIBLE : View.GONE);
+                  clampMain();
+                  refreshUi();
+              }
+
+              private void clampMain() {
+                  int w = expanded ? dp(260) : dp(46);
+                  int h = expanded ? dp(310) : dp(46);
+                  mainLp.x = Math.max(0, Math.min(mainLp.x, realW - w));
+                  mainLp.y = Math.max(0, Math.min(mainLp.y, realH - h));
+                  if (mainAttached) {
+                      try { wm.updateViewLayout(main, mainLp); } catch (Exception ignored) { }
+                  }
+              }
+
+              private void setHint(String s) {
+                  if (hint == null) return;
+                  hint.setText(s == null ? "" : s);
+                  hint.setVisibility(s == null ? View.GONE : View.VISIBLE);
+              }
+
+              private void refreshUi() {
+                  if (main == null) return;
+                  status.setText("Bàn phím OTG: " + kbCount + "   Chuột: " + mouseCount);
+                  btnOn.setText(mappingOn ? "Ánh xạ: BẬT" : "Ánh xạ: TẮT");
+                  btnOn.setBackground(shape(mappingOn ? TEAL : RED, GradientDrawable.RECTANGLE, 8));
+                  btnAdd.setText(capturing ? "Nhấn phím..." : "+ Phím");
+                  btnEdit.setText(editing ? "Xong" : "Sửa vị trí");
+                  bubble.setBackground(shape(withAlpha(mappingOn ? TEAL : RED, 0xE0), GradientDrawable.OVAL, 0));
+                  rebuildList();
+              }
+
+              private void rebuildList() {
+                  list.removeAllViews();
+                  boolean any = false;
+                  for (final Bind b : binds) {
+                      if (b.land != isLand()) continue;
+                      any = true;
+                      TextView name = txt(b.type == STICK
+                              ? "WASD  (bán kính " + Math.round(b.r * 100) + ")"
+                              : keyName(b.key), 13, Color.WHITE);
+                      LinearLayout r;
+                      if (b.type == STICK) {
+                          r = row(name,
+                                  btn("-", SLATE, v -> adjustRadius(b, -0.01f)),
+                                  btn("+", SLATE, v -> adjustRadius(b, 0.01f)),
+                                  btn("X", RED, v -> removeBind(b)));
+                      } else {
+                          r = row(name,
+                                  btn(b.type == HOLD ? "Giữ" : "Chạm", b.type == HOLD ? AMBER : TEAL,
+                                          v -> toggleMode(b)),
+                                  btn("X", RED, v -> removeBind(b)));
+                      }
+                      grow(name);
+                      list.addView(r);
+                  }
+                  if (!any) list.addView(txt("Chưa có phím nào.", 12, 0xFF9AA5B1));
+              }
+
+              // ===================== Chế độ sửa: vòng tròn kéo thả =====================
+
+              private void setEditing(boolean on) {
+                  editing = on;
+                  clearMarkers();
+                  if (on && mainAttached) {
+                      readScreen();
+                      for (Bind b : binds) {
+                          if (b.land == isLand()) addMarker(b);
+                      }
+                  }
+                  refreshUi();
+              }
+
+              private void clearMarkers() {
+                  for (Bind b : binds) {
+                      if (b.marker != null) {
+                          try { wm.removeView(b.marker); } catch (Exception ignored) { }
+                          b.marker = null;
+                      }
+                  }
+              }
+
+              private void addMarker(final Bind b) {
+                  final int size = b.type == STICK
+                          ? Math.max(dp(60), (int) (2 * b.r * Math.min(realW, realH)))
+                          : dp(44);
+                  TextView t = txt(b.type == STICK ? "WASD" : keyName(b.key), 11, Color.WHITE);
+                  t.setGravity(Gravity.CENTER);
+                  int color = b.type == STICK ? SKY : (b.type == HOLD ? AMBER : TEAL);
+                  t.setBackground(shape(withAlpha(color, 0xB8), GradientDrawable.OVAL, 0));
+                  final WindowManager.LayoutParams lp = newLp(size, size);
+                  lp.x = (int) (b.fx * realW) - size / 2;
+                  lp.y = (int) (b.fy * realH) - size / 2;
+                  attachDrag(t, lp, t, null, () -> {
+                      b.fx = Math.max(0f, Math.min(1f, (lp.x + size / 2f) / realW));
+                      b.fy = Math.max(0f, Math.min(1f, (lp.y + size / 2f) / realH));
+                      saveAll();
+                  });
+                  try {
+                      wm.addView(t, lp);
+                      b.marker = t;
+                  } catch (Exception ex) {
+                      b.marker = null;
+                  }
+              }
+
+              // ===================== Lưu / đọc cấu hình =====================
+
+              private void saveAll() {
+                  try {
+                      JSONArray a = new JSONArray();
+                      for (Bind b : binds) {
+                          JSONObject o = new JSONObject();
+                          o.put("t", b.type);
+                          o.put("k", b.key);
+                          o.put("x", (double) b.fx);
+                          o.put("y", (double) b.fy);
+                          o.put("r", (double) b.r);
+                          o.put("l", b.land);
+                          a.put(o);
+                      }
+                      prefs.edit().putString("binds", a.toString()).putBoolean("on", mappingOn).apply();
+                  } catch (Exception ignored) { }
+              }
+
+              private void loadBinds() {
+                  mappingOn = prefs.getBoolean("on", true);
+                  try {
+                      JSONArray a = new JSONArray(prefs.getString("binds", "[]"));
+                      for (int i = 0; i < a.length(); i++) {
+                          JSONObject o = a.getJSONObject(i);
+                          Bind b = new Bind();
+                          b.type = o.getInt("t");
+                          b.key = o.getInt("k");
+                          b.fx = (float) o.getDouble("x");
+                          b.fy = (float) o.getDouble("y");
+                          b.r = (float) o.getDouble("r");
+                          b.land = o.getBoolean("l");
+                          binds.add(b);
+                      }
+                  } catch (Exception ignored) { }
+              }
+          }
+          KM_EOF_7Q
+          mkdir -p 'app/src/main/res/values'
+          cat > 'app/src/main/res/values/strings.xml' <<'KM_EOF_7Q'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">OTG Key Mapper</string>
+              <string name="service_desc">Gán phím của bàn phím OTG thành thao tác chạm trên màn hình (dùng cho game). Dịch vụ chỉ đọc phím bấm và tạo cú chạm tại vị trí bạn đặt.</string>
+          </resources>
+          KM_EOF_7Q
+          mkdir -p 'app/src/main/res/xml'
+          cat > 'app/src/main/res/xml/accessibility_config.xml' <<'KM_EOF_7Q'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagRequestFilterKeyEvents"
+              android:canPerformGestures="true"
+              android:canRequestFilterKeyEvents="true"
+              android:description="@string/service_desc"
+              android:notificationTimeout="100" />
+          KM_EOF_7Q
+          cat > 'build.gradle' <<'KM_EOF_7Q'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          KM_EOF_7Q
+          cat > 'gradle.properties' <<'KM_EOF_7Q'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.nonTransitiveRClass=true
+          KM_EOF_7Q
+          mkdir -p 'gradle/wrapper'
+          cat > 'gradle/wrapper/gradle-wrapper.properties' <<'KM_EOF_7Q'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          KM_EOF_7Q
+          cat > 'settings.gradle' <<'KM_EOF_7Q'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "OtgKeyMapper"
+          include ':app'
+          KM_EOF_7Q
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OtgKeyMapper-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ github.run_number }}" app/build/outputs/apk/debug/app-debug.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "OTG Key Mapper v${{ github.run_number }}" \
+            --notes "APK debug - tai ve va cai dat."
